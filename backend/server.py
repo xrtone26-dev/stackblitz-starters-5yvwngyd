@@ -8,6 +8,11 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from bson.objectid import ObjectId
 from bson.errors import InvalidId
 
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+import secrets
+
 # ========== MODELOS ==========
 class Product(BaseModel):
     id: str
@@ -79,6 +84,9 @@ class ChatRequest(BaseModel):
     message: str
     history: Optional[List[dict]] = []
 
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
 # ========== CONFIGURACIÓN ==========
 app = FastAPI()
 
@@ -99,7 +107,6 @@ client = AsyncIOMotorClient(MONGO_URL)
 db = client.cazaofertas
 
 # ========== HELPER ANTI-ERRORES DE ID ==========
-# Esta función asegura que busquemos por 'id' o por '_id' nativo de Mongo
 def get_query_id(item_id: str):
     try:
         return {"$or": [{"id": item_id}, {"_id": ObjectId(item_id)}]}
@@ -130,8 +137,56 @@ async def get_offers(type: Optional[str] = None):
 
 @api_router.post("/chat")
 async def ai_chat_endpoint(data: ChatRequest):
-    # Aquí puedes integrar tu SDK de OpenAI o lógica de Chat
     return {"reply": "¡Hola! He recibido tu mensaje de Caza Ofertas, pero el cerebro de IA aún está en construcción. ¡Regresa pronto!"}
+
+# ========== RUTAS DE RECUPERACIÓN DE CONTRASEÑA ==========
+@api_router.post("/forgot-password")
+async def forgot_password(request: ForgotPasswordRequest):
+    email = request.email
+
+    reset_token = secrets.token_hex(32)
+    
+    frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:3000')
+    reset_link = f"{frontend_url}/?v={reset_token}"
+
+    sender_email = os.getenv('EMAIL_USER', 'tu_correo@gmail.com')
+    sender_password = os.getenv('EMAIL_PASS', 'tu_contraseña_de_aplicacion')
+
+    html_content = f"""
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="text-align: center; margin-bottom: 20px;">
+          <h1 style="color: #FFEA00; background-color: #000; padding: 10px; border-radius: 8px;">CazaOfertasML</h1>
+        </div>
+        <h2>Hola Omar Navarro,</h2>
+        <p>Recientemente solicitaste restablecer la contraseña de tu cuenta CazaOfertasML. Haz clic en el botón de abajo para restablecerla. <strong>Este restablecimiento de contraseña solo es válido durante las próximas 24 horas.</strong></p>
+        
+        <div style="text-align: center; margin: 30px 0;">
+          <a href="{reset_link}" style="background-color: #0056b3; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: bold;">Restablece tu contraseña</a>
+        </div>
+        
+        <p>Si tienes alguna pregunta sobre este correo, simplemente comunícate con nuestro equipo de soporte para obtener ayuda.</p>
+        <p>Con cariño,<br>El tío CazaOfertasML.</p>
+        
+        <hr style="border: 1px solid #eee; margin: 30px 0;">
+        
+        <p style="font-size: 12px; color: #666;">Si tiene problemas con el botón de arriba, copie y pegue la URL a continuación en su navegador web.</p>
+        <a href="{reset_link}" style="font-size: 12px; color: #0056b3; word-break: break-all;">{reset_link}</a>
+      </div>
+    """
+
+    message = MIMEMultipart("alternative")
+    message["Subject"] = "Restablecimiento de Contraseña | CazaOfertasML"
+    message["From"] = f"El tío CazaOfertasML <{sender_email}>"
+    message["To"] = email
+    message.attach(MIMEText(html_content, "html"))
+
+    try:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(sender_email, sender_password)
+            server.sendmail(sender_email, email, message.as_string())
+        return {"success": True, "message": "Correo enviado con éxito"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al enviar el correo: {str(e)}")
 
 # ========== RUTAS DE ADMINISTRACIÓN ==========
 @api_router.post("/admin/login")
@@ -168,7 +223,6 @@ async def update_product(product_id: str, product_data: ProductUpdate, password:
     if not update_dict:
         raise HTTPException(status_code=400, detail="No hay datos para actualizar")
     
-    # Recalculando porcentaje de descuento si los precios cambian
     if 'original_price' in update_dict or 'discount_price' in update_dict:
         product = await db.products.find_one(get_query_id(product_id), {"_id": 0})
         if product:
