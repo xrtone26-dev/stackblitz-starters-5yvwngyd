@@ -145,7 +145,6 @@ function YoutubeReelsPlayer({ videos, setTiktokVideos, setToastMessage, setShowT
 
         <div className="relative w-full max-w-sm h-[520px] bg-black rounded-3xl overflow-hidden border-4 border-black shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] flex flex-col select-none">
           <div className="relative w-full h-full bg-black flex items-center justify-center pointer-events-none">
-            {/* ESCUDO ANTI-YOUTUBE: El video no se puede clickear, pausar, ni salir a otra página */}
             <div className="relative w-full h-full pointer-events-none">
               <iframe
                 src={getYouTubeEmbedUrl(currentVideo.url)}
@@ -365,6 +364,11 @@ function App() {
   const [isMinimized, setIsMinimized] = useState(false);
   const [showTutorialModal, setShowTutorialModal] = useState(false);
   
+  // ========================================================
+  // ESTADO PARA EL POP-UP DE INVITACIÓN (A 1 MINUTO SIN USUARIO)
+  // ========================================================
+  const [showCommunityPopup, setShowCommunityPopup] = useState(false);
+  
   const [tiktokVideos, setTiktokVideos] = useState(() => {
     try {
       const saved = localStorage.getItem('cazaOfertasVideos');
@@ -394,7 +398,37 @@ function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [descuentos, setDescuentos] = useState([]);
   const [cupones, setCupones] = useState([]);
-  const [currentUser, setCurrentUser] = useState(null);
+  
+  // ==========================================
+  // SINCRONIZACIÓN DE USUARIO CON LOCALSTORAGE
+  // ==========================================
+  const [currentUser, setCurrentUser] = useState(() => {
+    return localStorage.getItem('cazaUser') || null;
+  });
+
+  useEffect(() => {
+    const usuarioGuardado = localStorage.getItem('cazaUser');
+    if (usuarioGuardado) {
+      setCurrentUser(usuarioGuardado);
+    }
+  }, []);
+
+  // ========================================================
+  // TEMPORIZADOR DE 1 MINUTO PARA EL POP-UP COMUNITARIO
+  // ========================================================
+  useEffect(() => {
+    if (!currentUser) {
+      const dismissed = sessionStorage.getItem('communityPopupDismissed');
+      if (!dismissed) {
+        const timer = setTimeout(() => {
+          if (!localStorage.getItem('cazaUser')) {
+            setShowCommunityPopup(true);
+          }
+        }, 60000); // 60,000 ms = 1 minuto exacto
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [currentUser]);
   
   const [currentTime, setCurrentTime] = useState(Date.now());
 
@@ -720,19 +754,108 @@ function App() {
         </>
       )}
 
+      {/* ======================================================== */}
+      {/* POP-UP AUTOMÁTICO A 1 MINUTO PARA USUARIOS NO REGISTRADOS */}
+      {/* ======================================================== */}
+      <AnimatePresence>
+        {showCommunityPopup && !currentUser && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[90] p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className={`relative rounded-3xl p-8 max-w-md w-full border text-center shadow-2xl ${
+                isLight ? 'bg-white border-purple-200 text-gray-800' : 'bg-neutral-900 border-yellow-400/50 text-neutral-100'
+              }`}
+            >
+              <button
+                onClick={() => {
+                  setShowCommunityPopup(false);
+                  sessionStorage.setItem('communityPopupDismissed', 'true');
+                }}
+                className="absolute top-4 right-4 text-gray-400 hover:text-red-500 transition-colors"
+              >
+                <X className="w-6 h-6" />
+              </button>
+
+              <div className="w-16 h-16 bg-yellow-400/20 text-yellow-400 rounded-full flex items-center justify-center mx-auto mb-4 border-2 border-yellow-400/40">
+                <Sparkles className="w-8 h-8 animate-pulse" />
+              </div>
+
+              <h3 className="text-2xl font-black mb-3 uppercase tracking-tight">
+                ¿Quieres unirte a nuestra comunidad?
+              </h3>
+
+              <p className="text-sm leading-relaxed mb-6 opacity-90">
+                Tenemos beneficios exclusivos para ti. Jugando, interactuando y descubriendo ofertas en nuestra plataforma, podrás <strong>ganar premios cada mes</strong> si te encuentras entre los usuarios con mayor actividad.
+              </p>
+
+              <div className="bg-yellow-400/10 border border-yellow-400/30 rounded-2xl p-4 mb-6 text-left">
+                <p className="text-xs font-bold uppercase tracking-wider text-yellow-400 mb-1">
+                  🌟 Únete a nuestra comunidad de Ahorradores
+                </p>
+                <p className="text-xs opacity-80">
+                  Crea tu perfil gratis en segundos para empezar a sumar puntos, participar en juegos y reclamar recompensas.
+                </p>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    setShowCommunityPopup(false);
+                    sessionStorage.setItem('communityPopupDismissed', 'true');
+                    setShowProfilePanel(true);
+                  }}
+                  className="flex-1 py-3 bg-yellow-400 hover:bg-yellow-300 text-black font-black rounded-xl text-xs uppercase transition-all shadow-lg"
+                >
+                  Crear Perfil 🚀
+                </button>
+                <button
+                  onClick={() => {
+                    setShowCommunityPopup(false);
+                    sessionStorage.setItem('communityPopupDismissed', 'true');
+                  }}
+                  className="px-5 py-3 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 font-bold rounded-xl text-xs transition-all border border-neutral-700"
+                >
+                  Cerrar
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* MENÚ FLOTANTE SUPERIOR DERECHO */}
-      <div className="fixed top-6 right-6 z-[60] flex flex-col gap-3">
-        <button
-          onClick={() => setShowProfilePanel(true)}
-          className={`w-12 h-12 rounded-full shadow-2xl flex items-center justify-center transition-all hover:scale-110 border-2 ${
-            isLight
-              ? 'bg-white text-purple-600 border-purple-200'
-              : 'bg-neutral-900 text-yellow-400 border-yellow-400/50'
-          }`}
-          title="Mi Perfil / Login"
-        >
-          <User className="w-6 h-6" />
-        </button>
+      <div className="fixed top-6 right-6 z-[60] flex flex-col items-center gap-3">
+        
+        {/* Contenedor del botón de perfil con el nickname arriba */}
+        <div className="flex flex-col items-center gap-1">
+          {currentUser && (
+            <span className={`font-bold text-[11px] truncate max-w-[65px] text-center ${
+              isLight ? 'text-purple-700' : 'text-yellow-400'
+            }`}>
+              @{localStorage.getItem('cazaNick') || 'User'}
+            </span>
+          )}
+          <button
+            onClick={() => setShowProfilePanel(true)}
+            className={`w-12 h-12 rounded-full shadow-2xl flex items-center justify-center overflow-hidden transition-all hover:scale-110 border-2 ${
+              isLight
+                ? 'bg-white text-purple-600 border-purple-200'
+                : 'bg-neutral-900 text-yellow-400 border-yellow-400/50'
+            }`}
+            title="Mi Perfil / Login"
+          >
+            {localStorage.getItem('cazaAvatarImg') ? (
+              <img src={localStorage.getItem('cazaAvatarImg')} alt="Perfil" className="w-full h-full object-cover" />
+            ) : currentUser ? (
+              <span className="text-xl font-black">{localStorage.getItem('cazaAvatar') || currentUser.charAt(0)}</span>
+            ) : (
+              <User className="w-6 h-6" />
+            )}
+          </button>
+        </div>
+
         <button
           onClick={() => setShowThemeModal(true)}
           className={`w-12 h-12 rounded-full shadow-2xl flex items-center justify-center transition-all hover:scale-110 border-2 ${
@@ -744,6 +867,7 @@ function App() {
         >
           <Settings className="w-6 h-6" />
         </button>
+        
         <button
           onClick={() => {
             if (isMinimized) {
@@ -1020,11 +1144,11 @@ function App() {
                               >
                                 <div className="flex items-center justify-center gap-3 w-full">
                                   <svg className="w-5 h-5 text-[#FFEA00] flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
-                                  <span className="text-xl md:text-2xl font-black tracking-wide uppercase">APROVECHALO</span>
+                                  <span className="text-xl md:text-2xl font-black tracking-wide uppercase">COPIAR CUPÒN</span>
                                   <svg className="w-5 h-5 text-[#FFEA00] flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
                                 </div>
                                 <div className="text-sm md:text-base font-bold tracking-tight -mt-1">
-                                  vuela rápido
+                                  E IR A MERCADO LIBRE
                                 </div>
                               </button>
                             )}
@@ -1290,7 +1414,8 @@ function App() {
         </div>
       )}
 
-      <GamesZone currentUser={currentUser} isLight={isLight} />
+      {/* AQUÍ ESTÁ EL CAMBIO PARA ENVIAR isAuthenticated A GAMESZONE */}
+      <GamesZone currentUser={currentUser} isLight={isLight} isAuthenticated={isAuthenticated} />
 
       {/* ZONA DE RECREACIÓN DE CAZAOFERTASML (PRODUCTOS PROBADOS EN YOUTUBE) */}
       <div className="container mx-auto px-4 mb-16 relative z-10">
@@ -1335,7 +1460,7 @@ function App() {
         }`}
       >
         <h2
-          className={`text-3xl md:text-4xl font-bold mb-4 ${
+          className={`text-3xl md:text-4xl font-bold mb-4 text-center ${
             isLight ? 'text-gray-800' : 'text-neutral-100 font-black'
           }`}
         >
