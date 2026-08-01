@@ -7,11 +7,7 @@ from pydantic import BaseModel
 from motor.motor_asyncio import AsyncIOMotorClient
 from bson.objectid import ObjectId
 from bson.errors import InvalidId
-
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-import secrets
+from groq import Groq
 
 # ========== MODELOS ==========
 class Product(BaseModel):
@@ -83,9 +79,7 @@ class AdminLoginRequest(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     history: Optional[List[dict]] = []
-
-class ForgotPasswordRequest(BaseModel):
-    email: str
+    systemPrompt: Optional[str] = None 
 
 # ========== CONFIGURACIÓN ==========
 app = FastAPI()
@@ -106,7 +100,6 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "Caza-Ofertas2026")
 client = AsyncIOMotorClient(MONGO_URL)
 db = client.cazaofertas
 
-# ========== HELPER ANTI-ERRORES DE ID ==========
 def get_query_id(item_id: str):
     try:
         return {"$or": [{"id": item_id}, {"_id": ObjectId(item_id)}]}
@@ -135,58 +128,60 @@ async def get_offers(type: Optional[str] = None):
         offers.append(doc)
     return offers
 
+# ========== EL CEREBRO DE LA IA CON SUPERPODERES (GROQ) ==========
 @api_router.post("/chat")
 async def ai_chat_endpoint(data: ChatRequest):
-    return {"reply": "¡Hola! He recibido tu mensaje de Caza Ofertas, pero el cerebro de IA aún está en construcción. ¡Regresa pronto!"}
-
-# ========== RUTAS DE RECUPERACIÓN DE CONTRASEÑA ==========
-@api_router.post("/forgot-password")
-async def forgot_password(request: ForgotPasswordRequest):
-    email = request.email
-
-    reset_token = secrets.token_hex(32)
+    GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
     
-    frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:3000')
-    reset_link = f"{frontend_url}/?v={reset_token}"
-
-    sender_email = os.getenv('EMAIL_USER', 'tu_correo@gmail.com')
-    sender_password = os.getenv('EMAIL_PASS', 'tu_contraseña_de_aplicacion')
-
-    html_content = f"""
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-        <div style="text-align: center; margin-bottom: 20px;">
-          <h1 style="color: #FFEA00; background-color: #000; padding: 10px; border-radius: 8px;">CazaOfertasML</h1>
-        </div>
-        <h2>Hola Omar Navarro,</h2>
-        <p>Recientemente solicitaste restablecer la contraseña de tu cuenta CazaOfertasML. Haz clic en el botón de abajo para restablecerla. <strong>Este restablecimiento de contraseña solo es válido durante las próximas 24 horas.</strong></p>
-        
-        <div style="text-align: center; margin: 30px 0;">
-          <a href="{reset_link}" style="background-color: #0056b3; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: bold;">Restablece tu contraseña</a>
-        </div>
-        
-        <p>Si tienes alguna pregunta sobre este correo, simplemente comunícate con nuestro equipo de soporte para obtener ayuda.</p>
-        <p>Con cariño,<br>El tío CazaOfertasML.</p>
-        
-        <hr style="border: 1px solid #eee; margin: 30px 0;">
-        
-        <p style="font-size: 12px; color: #666;">Si tiene problemas con el botón de arriba, copie y pegue la URL a continuación en su navegador web.</p>
-        <a href="{reset_link}" style="font-size: 12px; color: #0056b3; word-break: break-all;">{reset_link}</a>
-      </div>
-    """
-
-    message = MIMEMultipart("alternative")
-    message["Subject"] = "Restablecimiento de Contraseña | CazaOfertasML"
-    message["From"] = f"El tío CazaOfertasML <{sender_email}>"
-    message["To"] = email
-    message.attach(MIMEText(html_content, "html"))
-
+    if not GROQ_API_KEY:
+        return {"reply": "⚠️ El administrador aún no ha configurado la API Key de Groq en el servidor."}
+    
     try:
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login(sender_email, sender_password)
-            server.sendmail(sender_email, email, message.as_string())
-        return {"success": True, "message": "Correo enviado con éxito"}
+        # 1. LEER LA BASE DE DATOS EN TIEMPO REAL
+        active_products = await db.products.find({"active": True}).to_list(length=100)
+        active_offers = await db.offers.find({"active": True}).to_list(length=100)
+        
+        # 2. INYECTAR DATOS AL CEREBRO DE LA IA
+        db_context = "\n\n--- INVENTARIO Y OFERTAS REALES DISPONIBLES EN LA TIENDA ---\n"
+        if active_products:
+            db_context += "PRODUCTOS:\n"
+            for p in active_products:
+                db_context += f"- {p.get('title')}: Precio Descuento ${p.get('discount_price')}. Link real: {p.get('affiliate_link')}\n"
+        if active_offers:
+            db_context += "\nCUPONES:\n"
+            for o in active_offers:
+                db_context += f"- {o.get('title')}: Código '{o.get('code', 'N/A')}', Link real: {o.get('link')}\n"
+        
+        db_context += "\n--- REGLAS ESTRICTAS PARA TUS RESPUESTAS ---\n"
+        db_context += "1. SOLO recomienda productos o cupones que existan en el inventario de arriba. Si te piden algo que no está, di amablemente que por ahora no lo tienes.\n"
+        db_context += "2. NUNCA inventes enlaces. Usa EXACTAMENTE el 'Link real' que aparece en el inventario de arriba.\n"
+        db_context += "3. SÉ EXTREMADAMENTE BREVE. Da la respuesta directa en 1 o máximo 2 párrafos cortos. Elimina el relleno, ve directo al grano.\n"
+
+        ai_client = Groq(api_key=GROQ_API_KEY)
+        messages = []
+        
+        # Mezclamos su personalidad base con las reglas y datos de la tienda
+        base_prompt = data.systemPrompt if data.systemPrompt else "Eres un asistente experto de CazaOfertasML."
+        messages.append({"role": "system", "content": base_prompt + db_context})
+        
+        # Historial de usuario
+        for msg in data.history:
+            role = "user" if msg["sender"] == "user" else "assistant"
+            messages.append({"role": role, "content": msg["text"]})
+            
+        # Generar respuesta (Le bajamos la 'temperature' para que no sea fantasioso y le ponemos un límite de palabras)
+        chat_completion = ai_client.chat.completions.create(
+            messages=messages,
+            model="llama-3.3-70b-versatile",
+            temperature=0.3,
+            max_tokens=300
+        )
+        
+        return {"reply": chat_completion.choices[0].message.content}
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al enviar el correo: {str(e)}")
+        print(f"Error en AI: {str(e)}")
+        return {"reply": "¡Uy! Mi procesador está un poco saturado cazando ofertas en este momento. 😅 ¿Puedes intentarlo de nuevo en unos segundos?"}
 
 # ========== RUTAS DE ADMINISTRACIÓN ==========
 @api_router.post("/admin/login")
